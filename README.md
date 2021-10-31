@@ -1,6 +1,6 @@
-#LAMPgRNAtor
+# LAMPgRNAtor
 
-##Still Fixing Minor Bugs (Not Completed)
+## Still Fixing Minor Bugs (Not Completed)
 
 Installation
 ------------
