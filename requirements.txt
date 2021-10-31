@@ -1,0 +1,9 @@
+matplotlib
+numpy
+biopython
+tqdm
+bitarray
+keras==2.1.5
+theano==1.0.1
+h5py
+mkl
