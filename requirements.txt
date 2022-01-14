@@ -1,9 +1,13 @@
+theano==1.0.1
+kiwisolver==1.2.0
+pillow==7.2.0
+cycler==0.10.0
+pyparsing==2.4.7
+keras==2.1.5
+numpy==1.19.1
 matplotlib
-numpy
 biopython
 tqdm
 bitarray
-keras==2.1.5
-theano==1.0.1
 h5py
 mkl

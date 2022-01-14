@@ -8,7 +8,6 @@ import os
 from collections import defaultdict
 from matplotlib.lines import Line2D
 from LAMPgRNAtor.utils import * 
-from LAMPgRNAtor.Cas12gRNAtor import *
 from LAMPgRNAtor.simpleSearch import *
 
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
@@ -55,6 +54,11 @@ ALTERNATIVE_MAIN = [
 HEADER_BOWTIE_OFFTARGETS = 'offtargets'
 HEADER_BOWTIE_CONSERVATION = 'Conservation%'
 
+STORE_PATH = str.encode(os.getcwd() + '/')
+
+WINDOW_SIZE = 25
+gRNA_LENGTH = 27
+
 ##-------------------------------------------------------------------------------------------------
 ## LAMP Class & Internal Functions
 
@@ -77,14 +81,14 @@ class LAMP_set():
 
 		## gRNAs
 		self.start_gRNA = 0
-		self.end_gRNA = float(inf)
+		self.end_gRNA = float('inf')
 		self.gRNAs = []
 		self.overlap = overlap
 		self.sequence_gRNA = None
 		self.short = False
 		self.threshold = threshold
 
-		self.start = 0 ## F3 start
+		self.start = -1 ## F3 start
 		self.end = float('inf') ## B3 end
 		self.c_score_list = []
 		self.e_score_list = []
@@ -116,7 +120,7 @@ class LAMP_set():
 				raise ExecutionError('Sequence provided is too short')
 
 		self.sequence_gRNA = ref[self.start_gRNA: self.end_gRNA]
-		if len(self.sequence_gRNA) < 34:
+		if len(self.sequence_gRNA) < 27:
 			self.short = True #Skip Search
 	   
 	def _generate_gRNAs(self):
@@ -134,21 +138,27 @@ class LAMP_set():
 					if ((p - 4) < 0) or ((p+30)>len(self.sequence_gRNA)): continue
 					pos = self.start_gRNA + p
 					seq = self.sequence_gRNA[p-4:p+30]
+					if len(seq) != 34: continue
 					count += 1
 					gRNA_temp = Primer(f'gRNA', f'{self.id}-gRNA_{count}', seq, pos, source = 'gRNA', reverse = False)
 					self.gRNAs.append(gRNA_temp)
 
+		PAM_nucleotide = ['G', 'C', 'T']
+		pam = []
+		for a in PAM_nucleotide:
+			pattern = a + 'AAA'
 			pam = bitapSearch(self.sequence_gRNA, pattern, reverse = True, mismatch = 0)
 			if pam: 
 				for p in pam:
 					if ((p - 26) < 0) or ((p+8)>len(self.sequence_gRNA)): continue
 					pos = self.start_gRNA + p
 					seq = self.sequence_gRNA[p-26:p+8]
+					if len(seq) != 34: continue
 					count += 1
-					gRNA_temp = Primer(f'gRNA', f'{self.id}-gRNA_{count}', reverseC(seq), pos, source = 'gRNA', reverse = True)
+					gRNA_temp = Primer(f'gRNA', f'{self.id}-gRNA_{count}', seq, pos, source = 'gRNA', reverse = True)
 					self.gRNAs.append(gRNA_temp)
 
-		if self.gRNAs: print (f"FOUND SOME {len(self.gRNAs)} gRNAs")
+		#if self.gRNAs: print (f"FOUND SOME {len(self.gRNAs)} gRNAs")
 
 	def _predict_gRNAs(self, deepCpf1):
 		if not self.gRNAs: 
@@ -159,112 +169,24 @@ class LAMP_set():
 
 		if not deepCpf1.state: 
 			## PRINT WARNING 
-			logger.info("deepCpf1 Is not working!")
-			
+			logger.info("deepCpf1 Is not working optimally!")
+		
+		temp_gRNA = []
 		for g in self.gRNAs:
 			sequence = [g.seq]
 			score = deepCpf1.scoreSeqs(sequence) 
 			if score[0][0] > self.threshold:
-				g.score = score[0][0]
+				g.score = round(score[0][0],5)
+				print (g.id, g.seq, g.reverse, g.seq[4:31], reverseC(g.seq[4:31]), g.score)
 				g.seq = g.seq[4:31]
-				print (g.id, g.seq, g.score)
+				g.len = gRNA_LENGTH
+				temp_gRNA.append(g)
 
+		self.gRNAs = temp_gRNA
 
 	##---------------------------------------------------------------------------------------------
 	## Graph for LAMP Primer
 
-	@staticmethod
-	def create_relative_postional_plot(LAMP, prefix, conservation = [], entropy = []):
-		os.chdir(prefix + PLOT_DIR)
-		LAMP_title = LAMP.id
-
-		xlim_start = LAMP.start 
-		xlim_end = LAMP.end
-		start_inner = LAMP.start_gRNA
-		end_inner = LAMP.end_gRNA
-
-		plt.switch_backend('agg')
-		three = ['F3', 'B3']
-		two = ['F2','B2']
-		one = ['F1c', 'B1c']
-		loop = ['LB', 'LF']
-
-		if conservation and entropy: ax1 = plt.subplot(311) 
-		for primer in PRIMER_LIST:
-			current_primer = getattr(LAMP, primer)
-			if not current_primer: continue
-			colour = 'k'
-			primer_region = None
-			if primer in three:
-				primer_region = 4
-			elif primer in two:
-				primer_region = 3
-			elif primer in one:
-				primer_region = 1
-			elif primer in loop:
-				primer_region = 2
-				colour = 'b'
-
-			temp_dict = {}
-			for i in range(current_primer.pos, current_primer.pos + current_primer.len):
-				temp_dict[i] = primer_region
-			plt.plot(list(temp_dict.keys()), list(temp_dict.values()), color=colour, linewidth=2)
-		
-		counter = 1
-		if LAMP.gRNAs: 
-			for guide_RNA in LAMP.gRNAs:
-				counter += 0.25
-				temp_gRNA_dict = {}
-				if not guide_RNA.reverse:
-					for j in range(guide_RNA.consensus_pos[0], guide_RNA.consensus_pos[1]):
-						temp_gRNA_dict[j] = counter 
-				else:
-					for j in range(guide_RNA.consensus_pos[1], guide_RNA.consensus_pos[0]):
-						temp_gRNA_dict[j] = counter 
-				plt.plot(list(temp_gRNA_dict.keys()), list(temp_gRNA_dict.values()), color='r', linewidth=2)
-
-		plt.xlim(xlim_start, xlim_end-1)
-		plt.title('Positional plot for ' + LAMP_title)
-		#plt.ylabel('Primer', fontsize=6)
-		if LAMP.gRNAs:
-			plt.axvspan(start_inner, end_inner, color='r', alpha=0.5)
-			custom_lines = [Line2D([0], [0], color='r', lw=2),
-							Line2D([0], [0], color='k', lw=2),
-							Line2D([0], [0], color='b', lw=2)]
-			plt.legend(custom_lines, ['gRNA', 'LAMP Primers', 'LOOP regions'])
-			y_ticks = ['Primer 1', 'Loop', 'Primer 2', 'Primer 3']
-			plt.yticks([1,2,3,4], y_ticks)
-
-		elif not LAMP.gRNAs:
-			custom_lines = [Line2D([0], [0], color='k', lw=2),
-							Line2D([0], [0], color='b', lw=2)]
-			plt.legend(custom_lines, ['LAMP Primers', 'LOOP regions'])
-			y_ticks = ['Primer 1', 'Loop', 'Primer 2', 'Primer 3']
-			plt.yticks([1,2,3,4], y_ticks)
-		
-		plt.xlabel('Nucleotide position')
-
-		if conservation and entropy:
-			ax2 = plt.subplot(312)
-			plt.plot([i for i in range(len(entropy))], entropy, linewidth=0.5)
-			plt.title('Entropy/Conservation/gRNA scoring plot')
-			plt.ylabel('Entropy Score', fontsize=6) 
-			plt.rc('ytick',labelsize=4)
-			plt.setp(ax2.get_xticklabels(), fontsize=6)
-
-			ax3 = plt.subplot(313, sharex=ax1)
-			plt.plot([i for i in range(len(conservation))], conservation, linewidth=0.5)
-			plt.ylabel('Conservation Score', fontsize=6)
-			plt.rc('ytick',labelsize=4) 
-			plt.setp(ax3.get_xticklabels(), fontsize=6)
-
-		figure = plt.gcf() # get current figure
-		figure.set_size_inches(12, 6)
-		plt.savefig(prefix + '_' + LAMP_title + '_visualisation.png', dpi = 128)
-		os.chdir("..")
-
-
-	'''
 	@staticmethod
 	def create_relative_postional_plot(LAMP, prefix, conservation = [], entropy = []):
 		os.chdir(prefix + PLOT_DIR)
@@ -318,65 +240,48 @@ class LAMP_set():
 				else:
 					for j in range(guide_RNA.consensus_pos[1], guide_RNA.consensus_pos[0]):
 						temp_gRNA_dict[j] = counter 
-				plt.plot(list(temp_gRNA_dict.keys()), list(temp_gRNA_dict.values()), color='r', linewidth=2)
+				ax[0].plot(list(temp_gRNA_dict.keys()), list(temp_gRNA_dict.values()), color='r', linewidth=2)
 
-		ax[0].xlim(xlim_start, xlim_end-1)
-		fig.suptitle('Positional plot for ' + LAMP_title)
+		#ax[0].xlim(xlim_start, xlim_end-1)
+		ax[0].axis(xmin = xlim_start, xmax = xlim_end)
+		x_range = [i for i in range(xlim_start, xlim_end)]
+		
 		#plt.ylabel('Primer', fontsize=6)
 		if LAMP.gRNAs:
-			plt.axvspan(start_inner, end_inner, color='r', alpha=0.5)
+			ax[0].axvspan(start_inner, end_inner, color='r', alpha=0.3)
 			custom_lines = [Line2D([0], [0], color='r', lw=2),
 							Line2D([0], [0], color='k', lw=2),
 							Line2D([0], [0], color='b', lw=2)]
-			plt.legend(custom_lines, ['gRNA', 'LAMP Primers', 'LOOP regions'])
+			ax[0].legend(custom_lines, ['gRNA', 'LAMP Primers', 'LOOP regions'])
 			y_ticks = ['Primer 1', 'Loop', 'Primer 2', 'Primer 3']
 			ax[0].set_yticks([1,2,3,4], y_ticks)
 
 		elif not LAMP.gRNAs:
 			custom_lines = [Line2D([0], [0], color='k', lw=2),
 							Line2D([0], [0], color='b', lw=2)]
-			plt.legend(custom_lines, ['LAMP Primers', 'LOOP regions'])
+			ax[0].legend(custom_lines, ['LAMP Primers', 'LOOP regions'])
 			y_ticks = ['Primer 1', 'Loop', 'Primer 2', 'Primer 3']
 			ax[0].set_yticks([1,2,3,4], y_ticks)
-		
-		
 
 		if conservation and entropy:
-
-			fig, ax = plt.subplots(figsize=(15, 5), sharex=True)
-
-			ax.plot([i for i in range(len(conservation))], conservation, linestyle="", color="blue", marker="o", markersize = 0.5)
-			ax.set_ylabel("Conservation %",color="blue",fontsize=14)
-			ax.tick_params(axis="x", labelsize=12) 
-			ax.tick_params(axis='x', which='both', labelsize=10, labelbottom=True)
+			ax[1].plot(x_range, conservation, linestyle="", color="blue", marker="o", markersize = 1.2)
+			ax[1].set_ylabel("Conservation %",color="blue",fontsize=14)
+			ax[1].tick_params(axis="x", labelsize=12) 
+			ax[1].tick_params(axis='x', which='both', labelsize=10, labelbottom=True)
 			
-			ax2 = ax.twinx()
-			ax2.plot([i for i in range(len(entropy))], entropy, linestyle="", color="red", marker="o", markersize = 0.5)
-			ax2.set_ylabel("Entropy",color="red",fontsize=14)
-
+			ax2 = ax[1].twinx()
+			ax2.plot(x_range, entropy, linestyle="", color="red", marker="o", markersize = 1.2)
+			ax2.set_ylabel("Entropy Score",color="red",fontsize=14)
+			fig.suptitle('Entropy | Conservation | Positional plot for ' + LAMP_title)
 		else:
+			fig.suptitle('Positional plot for ' + LAMP_title)
 
-			ax[0].set_xlabel('Nucleotide position')
-
-
-			ax2 = plt.subplot(312)
-			plt.plot([i for i in range(len(entropy))], entropy, linewidth=0.5)
-			plt.title('Entropy/Conservation/gRNA scoring plot')
-			plt.ylabel('Entropy Score', fontsize=6) 
-			plt.rc('ytick',labelsize=4)
-			plt.setp(ax2.get_xticklabels(), fontsize=6)
-
-			ax3 = plt.subplot(313, sharex=ax1)
-			plt.plot([i for i in range(len(conservation))], conservation, linewidth=0.5)
-			plt.ylabel('Conservation Score', fontsize=6)
-			plt.rc('ytick',labelsize=4) 
-			plt.setp(ax3.get_xticklabels(), fontsize=6)
-
+		ax[0].set_xlabel('Nucleotide position')
 		figure = plt.gcf() # get current figure
 		figure.set_size_inches(12, 6)
 		plt.savefig(prefix + '_' + LAMP_title + '_visualisation.png', dpi = 128)
 		os.chdir("..")
-		'''
+
 ##-------------------------------------------------------------------------------------------------
 ## Primer or gRNA class
 
@@ -397,7 +302,7 @@ class Primer():
 		## For Consensus Sequence Search
 		self.mode = None
 		self.consensus_query = ''
-		self._consensus_pos = (float('inf'), float('inf') )
+		self._consensus_pos = (-1, -1)
 		self.found = False
 		self.cigar = ''
 		self.Intolerant = False
@@ -568,7 +473,7 @@ def convert_dict_2_class(primer_dict, overlap = False, threshold = 0):
 		for k, v in value.items():
 			reverse = k in PRIMER_LIST_REVERSE
 			primer = Primer(k, f'{key}-{k}', v[1], v[0], source = source, reverse = reverse)
-			print (k, f'{key}-{k}', v[1], v[0], source, reverse)
+			#print (k, f'{key}-{k}', v[1], v[0], source, reverse)
 			setattr(temp_set, k, primer)
 		primer_class.append(temp_set)
 
@@ -576,11 +481,12 @@ def convert_dict_2_class(primer_dict, overlap = False, threshold = 0):
 		raise ExecutionError("No LAMP found!?")
 	return primer_class
 
-def open_LAMP_files(args, ref):
+def open_LAMP_files(args_stored, ref, primer_class):
+	overlap, threshold, LAMP_csv = args_stored
 	ref = ref.ReconstructSequence()
 	file_type = None
 	primer_dict = {}
-	for i in list(args.LAMP_csv): #process more than one file at once
+	for i in list(LAMP_csv): #process more than one file at once
 		with open(i, 'r') as f:
 			for line in f:
 				line = line.strip('\n')
@@ -606,7 +512,8 @@ def open_LAMP_files(args, ref):
 		else:
 			primer_dict = primer_dict_temp
 
-	primer_class = convert_dict_2_class(primer_dict, args.overlap, args.threshold)
+
+	primer_class += convert_dict_2_class(primer_dict, overlap, threshold)
 	return primer_class
 
 ##-------------------------------------------------------------------------------------------------
@@ -624,7 +531,7 @@ def _update_primer(g, matches, entropy_list, conservation_list, store = False):
 	if matches:
 		best = matches.pop(0)
 		g.consensus_pos = best.pos[0]
-		g.consensus_query = reverseC(best.query)
+		g.consensus_query = reverseC(best.query) if g.reverse else best.query
 		g.mismatch = best.editDistance
 		#g.Intolerant = best.intolerant
 		g.cigar = best.cigar 
@@ -635,7 +542,7 @@ def _update_primer(g, matches, entropy_list, conservation_list, store = False):
 		g.scoring(c_score_list, e_score_list, store)
 		g.found = True
 
-		print (1, g.id, g.c_mean, g.c_SD)
+		#print (1, g.id, g.c_mean, g.c_SD)
 		if matches: g.alternative += matches
 				
 	else:
@@ -663,6 +570,7 @@ def process_LAMP(args,
 	## Find MSA
 	updated_LAMP = []
 	if conservation_list and entropy_list:
+		consensus_length = consensus.length
 		consensus = consensus.ReconstructSequence()
 		for LAMP in LAMP_list:
 			for p in PRIMER_LIST:
@@ -671,18 +579,26 @@ def process_LAMP(args,
 				query = primer.seq 
 				matches = bitapSearch(consensus, query, reverse = primer.reverse, mismatch = mismatch)
 				_update_primer(primer, matches, entropy_list, conservation_list, store)
-				print (2, primer.id, primer.c_mean, primer.c_SD, primer.found, primer.mismatch)
+				#print (2, primer.id, primer.c_mean, primer.c_SD, primer.found, primer.mismatch)
 
 			for g in LAMP.gRNAs:
-				query = g.seq 
+				query = g.seq if not g.reverse else reverseC(g.seq)
 				matches = bitapSearch(consensus, query, reverse = g.reverse, mismatch = mismatch)
 				_update_primer(g, matches, entropy_list, conservation_list, store)
-				print (3, g.id, g.c_mean, g.c_SD, g.found, g.mismatch, g.score)
+				#print (3, g.id, g.c_mean, g.c_SD, g.found, g.mismatch, g.score)
 
 			LAMP._update_start_end()
 			if args.plot:
-				e_score_list = entropy_list[LAMP.start:LAMP.end]
-				c_score_list = conservation_list[LAMP.start:LAMP.end]
+				start_temp = LAMP.start
+				end_temp = LAMP.end  # + WINDOW_SIZE if LAMP.end+WINDOW_SIZE < consensus_length else LAMP.end
+
+				if start_temp < 0 or end_temp < 0: continue
+				#print (f'Slicing {start_temp} , {end_temp}')
+				e_score_list = entropy_list[start_temp:end_temp]
+				c_score_list = conservation_list[start_temp:end_temp]
+				#if LAMP.end+WINDOW_SIZE < consensus_length:
+				#	e_score_list = get_moving_average(e_score_list, window_size = WINDOW_SIZE)
+				#	c_score_list = get_moving_average(c_score_list, window_size = WINDOW_SIZE)
 				LAMP_set.create_relative_postional_plot(LAMP, args.prefix, c_score_list, e_score_list)
 
 			updated_LAMP.append(LAMP)
@@ -705,6 +621,9 @@ def multi_search(main_args, wavelet, reference, LAMP_class, MSA_ed = False, scor
 	if main_args.plot:
 		if not os.path.isdir(main_args.prefix + PLOT_DIR): 
 			os.mkdir(main_args.prefix + PLOT_DIR) 
+
+	if main_args.find_gRNA:
+		from LAMPgRNAtor.Cas12gRNAtor import gRNA, gRNA_Prediction
 
 	from multiprocessing import Process, Queue, Manager, RawArray
 	number_processors = main_args.CPU
@@ -761,18 +680,18 @@ def bowtie_to_summary(file, mode = "offtarget"):
 		if mapping_status == 16 or mapping_status == 0:
 			if mode == "conservation":
 				if not sgrna_name in list(fasta_dict.keys()):
-					fasta_dict[sgrna_name] = 1
+					fasta_dict[sgrna_name] = [genome_name]
 				else:
-					fasta_dict[sgrna_name] += 1
+					fasta_dict[sgrna_name].append(genome_name)
 		
 			if mode == "offtarget":
 				if not sgrna_name in list(fasta_dict.keys()):
 					fasta_dict[sgrna_name] = [genome_name]
 				else:
-					print(fasta_dict[sgrna_name])
+					#print(fasta_dict[sgrna_name])
 					fasta_dict[sgrna_name].append(genome_name)
 
 	if mode == "conservation":
-		fasta_dict = {k:round(v/seq_count * 100, 5) for k,v in fasta_dict.items()}
+		fasta_dict = {k:round(len(list(set(v)))/seq_count * 100, 5) for k,v in fasta_dict.items()}
 
 	return fasta_dict

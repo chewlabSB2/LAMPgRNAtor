@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import logging
 import logging.handlers
 import time
 import argparse
 import tqdm
 from LAMPgRNAtor.LAMP_utils import *
+import GLAPD
+from LAMPgRNAtor._version import __version__ as version
 
 logger = logging.getLogger(__name__)
-version = "LAMPgRNAtor v1.0"
+#version = "LAMPgRNAtor v1.0"
 
 DESCRIPTION = f'''
 {version} combine module Predicts for Cas12a gRNAs \n
@@ -31,7 +34,7 @@ def get_args():
 	parser.add_argument('-bo', '--bowtie-offtarget', dest = "offtarget", 
 						help="Path to fasta file for Bowtie offtarget  Filtering")
 	
-	parser.add_argument('-p', '--prefix', default = 'RfxCas13d_gRNA', 
+	parser.add_argument('-p', '--prefix', default = 'LAMPgRNAtor', 
 						help='file name prefix to your file names (Default: %(default)s)')	
 	parser.add_argument('-d', '--debug',
 						help='Print lots of debugging statements',
@@ -39,10 +42,12 @@ def get_args():
 						default=logging.INFO)
 	parser.add_argument('-c', '--concatenate', default=None, dest = 'concat',
 						help='Concatenate between F1c and B1c eg. TTTT [make sure it is A, C, G, T] (Default: %(default)s)')
-	parser.add_argument('-l', '--LAMP',  dest='LAMP_csv', required=True, nargs = '+',
+	parser.add_argument('-l', '--LAMP',  dest='LAMP_csv', nargs = '+',
 						metavar="txt", help="accepts a list of GLAPD and LAMP output")
 	parser.add_argument('-t', '--threshold', default=50, help="Minimum cut-off point for DeepCpf1 score (Default: %(default)s)")
 
+	parser.add_argument('--no-GLAPD', dest='find_primers', action="store_false", 
+						help='Find LAMP Primers using GLAPD (Default: True)')
 	parser.add_argument('--overlap', action="store_false", 
 						help='Allow overlap of gRNA with F1c and B1c regions (Default: (No Overlap))')
 	parser.add_argument('--threads', default=4, type=int, dest = 'CPU', 
@@ -240,7 +245,7 @@ def _write_LAMP(args, LAMP_Class, status):
 			write_all.write('\n\n')
 			## Write Conservation Supplementary Score
 			if MSA_ed:
-				write_all.write('CONSERVATION SCORES')
+				write_all.write('CONSERVATION SCORES\n')
 				for primer in PRIMER_LIST:
 					p = getattr(LAMP, primer)
 					if not p: continue
@@ -255,7 +260,7 @@ def _write_LAMP(args, LAMP_Class, status):
 						write_all.write(f'{g.id},' + ",".join(conservation_list) + "\n")
 
 				write_all.write('\n\n')
-				write_all.write('ENTROPY SCORES')
+				write_all.write('ENTROPY SCORES\n')
 			## Write Entropy Supplementary Score
 				for primer in PRIMER_LIST:
 					p = getattr(LAMP, primer)
@@ -272,7 +277,7 @@ def _write_LAMP(args, LAMP_Class, status):
 
 				write_all.write('\n\n')
 
-			write_all.write('ALTERNATIVES')
+			write_all.write('ALTERNATIVES\n')
 			## Write Alternatives
 			write_all.write(",".join(HEADER_MAIN_1))
 			write_all.write("," + ",".join(ALTERNATIVE_MAIN) + '\n')
@@ -309,30 +314,47 @@ def debugging(primer_class, message = "Test"):
 		if p.LF: logger.info(f"{p.id} LF: {p.LF.seq}")
 		if p.LB: logger.info(f"{p.id} LB: {p.LB.seq}")
 
-
 def main():
 	args = get_args()
 	start_time = time.time()
 	logging.basicConfig(level=args.loglevel, format=FORMAT)
-	logger.info(f"{version} starting!!")
+	logger.info(f"LAMPgRNAtor v{version} starting!!")
 	temp_files_to_remove = []
 	bowtie_ed = MSA_ed = offtarget_status = False
 
 	## Reference for 1) to find gRNA 2) LAVA
 	reference = get_sequence(args.reference)
 	reference = Wavelet_Tree(reference)
+	
+	primer_class = []
+	if args.find_primers:
+		store_path = str.encode(os.getcwd() + '/')
+		logger.info(f"Finding Potential Primers!")
+		minLen = 18 if args.find_gRNA else 0
+		GLAPD_prefix = args.prefix + '.GLAPD'
+		ref = reference.ReconstructSequence()
+		GLAPD.single_candidate(str.encode(ref), str.encode(args.prefix), store_path)
+		
+		logger.info(f"Finding LAMP Primer Sets!")
+		GLAPD.design_LAMP(str.encode(args.prefix), str.encode(ref), str.encode(GLAPD_prefix), store_path, minlen = minLen)
+		
+		del ref
+		args_stored = (args.overlap, args.threshold, [GLAPD_prefix])
+		primer_class = open_LAMP_files(args_stored, reference, primer_class)
 
 	## Open LAMP Primer Files 
-	logger.info(f"Opening LAMP Files!")
-	primer_class = open_LAMP_files(args, reference)
-	#debugging(primer_class)
+	if args.LAMP_csv:
+		logger.info(f"Opening LAMP Files!")
+		args_stored = (args.overlap, args.threshold, args.LAMP_csv)
+		primer_class = open_LAMP_files(args_stored, reference, primer_class)
+		#debugging(primer_class)
 
+	logger.info(f"Total Number of LAMP Primer Sets: {len(primer_class)}")
+	
 	## Calculate Conservation & Entropy
 	logger.info(f"Calculating MSA, might take awhile!")
 	consensus, score, MSA_info = calculate_MSA(args)
 	MSA_ed, do_bowtie = MSA_info
-	logger.info(f"MSA_ed? {MSA_ed}")
-	logger.info(f"Find gRNAs? {args.find_gRNA}")
 	if MSA_ed: 
 		consensus = Wavelet_Tree(consensus)
 
@@ -346,18 +368,22 @@ def main():
 	#debugging(primer_class, message = "Updated")
 	## Create Fasta for Bowtie 
 	LAMP_handle = _create_fasta(primer_class, args.prefix)
-	
 	conservation_summary, offtarget_summary = None, None
 
-	## Conservation Bowtie
-	logger.info(f"Bowtie for Conservation!")
-	conservation_summary, temp_files_to_append = bowtie_main(args, LAMP_handle, mode = 'conservation')
-	temp_files_to_remove += temp_files_to_append
+	if sys.platform != 'win32':
+		## Conservation Bowtie
+		logger.info(f"Bowtie for Conservation!")
+		conservation_summary, temp_files_to_append = bowtie_main(args, LAMP_handle, mode = 'conservation')
+		temp_files_to_remove += temp_files_to_append
 
-	## Offtarget Bowtie
-	logger.info(f"Bowtie for Offtarget!")
-	offtarget_summary, temp_files_to_append = bowtie_main(args, LAMP_handle, mode = 'offtarget')
-	temp_files_to_remove += temp_files_to_append
+		## Offtarget Bowtie
+		logger.info(f"Bowtie for Offtarget!")
+		offtarget_summary, temp_files_to_append = bowtie_main(args, LAMP_handle, mode = 'offtarget')
+		temp_files_to_remove += temp_files_to_append
+	
+	else:
+		''' FUTURE UPDATE '''
+		logger.info(f"Skipping Bowtie!")
 	
 	## Update LAMP Objects - Offtarget & Conservation
 	if conservation_summary: 
@@ -381,7 +407,6 @@ def main():
 	end_time = time.time()
 	total_time = round(end_time - start_time,3)
 	logger.info(f"{version} has Ended in {total_time} seconds!")
-
 
 if __name__ == '__main__':
 	main()

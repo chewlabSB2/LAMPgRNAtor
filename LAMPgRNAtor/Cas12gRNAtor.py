@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # original source from https://github.com/MyungjaeSong/Paired-Library
-# modified from Max Haeussler for better integration into parse LAMP 
+# modified from Max Haeussler for better integration into LAMPgRNAtor 
 
 from os.path import dirname, join
 from numpy import *
@@ -30,12 +30,13 @@ def warn(*args, **kwargs):
 import warnings
 warnings.warn = warn
 
+gRNA_LENGTH = 27
 
 class gRNA():
 	def __init__(self, start, end, prediction_score, forward = True):
 		self.start = start
 		self.end = end
-		self.length = 27
+		self.length = gRNA_LENGTH
 		self.forward = forward
 		self.prediction_score = None
 		self.name = None
@@ -131,4 +132,6 @@ class gRNA_Prediction():
 		output = [55.699306, 53.469837]
 		scoreSeqs_, _, _ = self.scoreSeqs(sequence)
 		scoreSeqs_ = [round(float(i),6) for i in scoreSeqs_]
+		print (output)
+		print (scoreSeqs_)
 		return scoreSeqs_ == output

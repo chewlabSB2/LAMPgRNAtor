@@ -4,7 +4,6 @@ from bitarray import bitarray
 import numpy as np
 from LAMPgRNAtor.utils import reverseC
 
-
 class Node:
 	def __init__(self, value = []):
 		self.left  = None #0 
