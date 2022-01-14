@@ -15,6 +15,7 @@ python setup.py build_ext install
 ```
 
 (Advised to Use Anaconda as dependencies might clash with other software):
+
 Installation via Anaconda
 ```bash
 conda create -n LAMPgRNAtor python=3.8
@@ -30,9 +31,18 @@ Usage
 ### LAMPgRNAtor-main 
 
 With reference to the test dataset (MERS-CoV)
+
 ```bash
 mafft --add NonMSAMERS.fasta --keeplength --reorder --nomemsave --thread $thread referenceMERS.fasta 1> MSAMERS.fasta 2> MAFFT_error.log
 LAMPgRNAtor-main -r referenceMERS.fasta -bc NonMSAMERS.fasta -m MSAMERS.fasta --threads 8 -p MERS 1>run1.o 2>run1.e
+```
+
+### LAMPgRNAtor-LAMP
+
+In order to design LAMP primers of any reference: 
+
+```bash
+LAMPgRNAtor-LAMP -r referenceMERS.fasta -p MERS
 ```
 
 Expected Output
