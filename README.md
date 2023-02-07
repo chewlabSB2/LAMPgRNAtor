@@ -14,7 +14,7 @@ cd LAMPgRNAtor
 python setup.py build_ext install
 ```
 
-(Advised to Use Anaconda as dependencies might clash with other software):
+Advised to use an environment as dependencies might clash with other software:
 
 Installation via Anaconda
 ```bash
